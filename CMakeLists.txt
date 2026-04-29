@@ -1,12 +1,21 @@
 cmake_minimum_required(VERSION 3.20)
 project(NoiseGate VERSION 1.0.0)
 
-set(JUCE_DIR "C:/JUCE" CACHE PATH "Path to JUCE library")
-if(NOT EXISTS "${JUCE_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR "JUCE library not found at ${JUCE_DIR}. Please ensure JUCE is located at C:/JUCE or update the JUCE_DIR variable.")
-endif()
+# 1. Try finding JUCE locally (Fast, for local development)
+find_package(JUCE CONFIG PATHS "C:/JUCE")
 
-add_subdirectory("${JUCE_DIR}" juce)
+# 2. Plan B: If not found locally, fetch it from GitHub
+if(NOT TARGET juce::juce_recommended_config_flags)
+    message(STATUS "JUCE not found locally. Downloading from GitHub (this will take a while)...")
+    
+    include(FetchContent)
+    FetchContent_Declare(
+        JUCE
+        GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+        GIT_TAG        8.0.0
+    )
+    FetchContent_MakeAvailable(JUCE)
+endif()
 
 juce_add_plugin(NoiseGate
     COMPANY_NAME "MyCompany"
