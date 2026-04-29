@@ -13,5 +13,10 @@ public:
 
 private:
     NoiseGateProcessor& audioProcessor;
+    juce::Slider thresholdSlider;
+    juce::Label thresholdLabel;
+    
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> thresholdAttachment;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoiseGateEditor)
 };

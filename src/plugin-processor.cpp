@@ -4,11 +4,28 @@
 NoiseGateProcessor::NoiseGateProcessor()
     : AudioProcessor(BusesProperties()
                      .withInput("Input", juce::AudioChannelSet::stereo(), true)
-                     .withOutput("Output", juce::AudioChannelSet::stereo(), true))
+                     .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+      treeState(*this, nullptr, "PARAMETERS", createParameterLayout())
 {
+    thresholdParameter = treeState.getRawParameterValue("threshold");
 }
 
 NoiseGateProcessor::~NoiseGateProcessor() {}
+
+juce::AudioProcessorValueTreeState::ParameterLayout NoiseGateProcessor::createParameterLayout()
+{
+    std::vector<std::unique_ptr<juce::RangedAudioParameter>> parameters;
+
+    auto thresholdParam = std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID("threshold", 1),
+        "Threshold",
+        juce::NormalisableRange<float>(-60.0f, 0.0f, 0.1f),
+        -60.0f
+    );
+
+    parameters.push_back(std::move(thresholdParam));
+    return { parameters.begin(), parameters.end() };
+}
 
 const juce::String NoiseGateProcessor::getName() const { return JucePlugin_Name; }
 bool NoiseGateProcessor::acceptsMidi() const { return false; }
@@ -24,7 +41,9 @@ void NoiseGateProcessor::changeProgramName(int index, const juce::String& newNam
 
 void NoiseGateProcessor::prepareToPlay(double sampleRate, int samplesPerBlock)
 {
-    juce::ignoreUnused(sampleRate, samplesPerBlock);
+    juce::ignoreUnused(samplesPerBlock);
+    smoothedGain.reset(sampleRate, 0.05);
+    smoothedGain.setCurrentAndTargetValue(1.0f);
 }
 
 void NoiseGateProcessor::releaseResources() {}
@@ -42,18 +61,34 @@ void NoiseGateProcessor::processBlock(juce::AudioBuffer<float>& audioBuffer, juc
         audioBuffer.clear(outputChannelIndex, 0, audioBuffer.getNumSamples());
     }
 
-    const float noiseThreshold = 0.1f;
+    if (thresholdParameter == nullptr || totalNumInputChannels == 0)
+        return;
 
-    for (int channelIndex = 0; channelIndex < totalNumInputChannels; ++channelIndex)
+    const float currentThresholdDecibels = thresholdParameter->load();
+    const float currentThresholdLinear = juce::Decibels::decibelsToGain(currentThresholdDecibels);
+    const int numSamples = audioBuffer.getNumSamples();
+
+    for (int sampleIndex = 0; sampleIndex < numSamples; ++sampleIndex)
     {
-        auto* channelData = audioBuffer.getWritePointer(channelIndex);
+        float maximumAbsSampleValue = 0.0f;
         
-        for (int sampleIndex = 0; sampleIndex < audioBuffer.getNumSamples(); ++sampleIndex)
+        for (int channelIndex = 0; channelIndex < totalNumInputChannels; ++channelIndex)
         {
-            if (std::abs(channelData[sampleIndex]) < noiseThreshold)
+            float absoluteSample = std::abs(audioBuffer.getReadPointer(channelIndex)[sampleIndex]);
+            if (absoluteSample > maximumAbsSampleValue)
             {
-                channelData[sampleIndex] = 0.0f;
+                maximumAbsSampleValue = absoluteSample;
             }
+        }
+
+        const float targetGain = (maximumAbsSampleValue < currentThresholdLinear) ? 0.0f : 1.0f;
+        smoothedGain.setTargetValue(targetGain);
+        const float currentGainMultiplier = smoothedGain.getNextValue();
+
+        for (int channelIndex = 0; channelIndex < totalNumInputChannels; ++channelIndex)
+        {
+            auto* channelData = audioBuffer.getWritePointer(channelIndex);
+            channelData[sampleIndex] *= currentGainMultiplier;
         }
     }
 }
@@ -67,12 +102,24 @@ juce::AudioProcessorEditor* NoiseGateProcessor::createEditor()
 
 void NoiseGateProcessor::getStateInformation(juce::MemoryBlock& destData)
 {
-    juce::ignoreUnused(destData);
+    auto state = treeState.copyState();
+    std::unique_ptr<juce::XmlElement> xmlElement(state.createXml());
+    if (xmlElement != nullptr)
+    {
+        copyXmlToBinary(*xmlElement, destData);
+    }
 }
 
 void NoiseGateProcessor::setStateInformation(const void* data, int sizeInBytes)
 {
-    juce::ignoreUnused(data, sizeInBytes);
+    std::unique_ptr<juce::XmlElement> xmlState(getXmlFromBinary(data, sizeInBytes));
+    if (xmlState != nullptr)
+    {
+        if (xmlState->hasTagName(treeState.state.getType()))
+        {
+            treeState.replaceState(juce::ValueTree::fromXml(*xmlState));
+        }
+    }
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

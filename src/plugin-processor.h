@@ -29,6 +29,13 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    juce::AudioProcessorValueTreeState treeState;
+
 private:
+    juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    
+    std::atomic<float>* thresholdParameter = nullptr;
+    juce::SmoothedValue<float> smoothedGain;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(NoiseGateProcessor)
 };
